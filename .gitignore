@@ -1,0 +1,15 @@
+# Environment variables / secrets - never commit these
+.env
+.env.*
+!.env.example
+
+# Backup CSV that may contain data from failed SQL writes
+ScriptMonitoringCSV.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
