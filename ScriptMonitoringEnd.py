@@ -159,7 +159,7 @@ def scriptmonitoring(
                 r"C:\Users"
                 + "\\"
                 + user
-                + r"\Boston University\Continuous Improvement & Data Analytics - Documents\Automation and Data\MonitoringForCIDADesktop"
+                + r"\Boston University\Continuous Improvement & Data Analytics - Automation and Data\MonitoringForCIDADesktop"
             )
         os.chdir(backup_path)
         ScriptMonitoringCSV = pd.read_csv("ScriptMonitoringCSV.csv")
