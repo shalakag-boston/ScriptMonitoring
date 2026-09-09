@@ -1,4 +1,5 @@
 import os
+import getpass
 import pandas as pd
 import asana
 from sqlalchemy import create_engine
@@ -24,7 +25,7 @@ def scriptmonitoring(
     scriptfinish="1/1/1899",
     scriptinput="",
     scriptoutput="T",
-    user="ipoole",
+    user=None,
     _uuid="",
     result="",
     failure=0,
@@ -34,7 +35,20 @@ def scriptmonitoring(
     script output, the user (which should be defined via the
     ScriptImportStart), a result, and whether or not the script succeeded
     or failed reprsented as 1 or a 0
+
+    If `user` is not passed in, it defaults to the current OS login
+    (via getpass.getuser()) rather than being hardcoded to one specific
+    person. This matters because `user` is also used to build the
+    backup-CSV folder path below.
     """
+    if user is None:
+        user = getpass.getuser()
+
+    # Who Asana failure tasks get assigned to. Defaults to the original
+    # owner (ipoole@bu.edu) for backward compatibility, but can be
+    # overridden per-environment so this isn't hardcoded to one person.
+    asana_assignee = os.environ.get("CIDA_ASANA_ASSIGNEE", "ipoole@bu.edu")
+
     # setting up asana for later usage
     asana_access_token = os.environ.get("CIDA_ASANA_ACCESS_TOKEN")
     if not asana_access_token:
@@ -87,8 +101,9 @@ def scriptmonitoring(
                 "script (see .env.example)."
             )
         table = "python_script_monitoring"
+        odbc_driver = os.environ.get("CIDA_SQL_ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
         connection_string = (
-            "DRIVER={ODBC Driver 13 for SQL Server};SERVER="
+            "DRIVER={" + odbc_driver + "};SERVER="
             + server
             + ";DATABASE="
             + database
@@ -134,12 +149,19 @@ def scriptmonitoring(
             cnxn.close()
         except:
             pass
-        os.chdir(
-            r"C:\Users"
-            + "\\"
-            + user
-            + r"\Boston University\Continuous Improvement & Data Analytics - Documents\Automation and Data\MonitoringForCIDADesktop"
-        )
+        # The backup folder can be set directly via CIDA_MONITORING_BACKUP_PATH
+        # (recommended - works regardless of who runs the script or what
+        # their OneDrive folder looks like). If that's not set, we fall
+        # back to the old convention of building a per-user OneDrive path.
+        backup_path = os.environ.get("CIDA_MONITORING_BACKUP_PATH")
+        if not backup_path:
+            backup_path = (
+                r"C:\Users"
+                + "\\"
+                + user
+                + r"\Boston University\Continuous Improvement & Data Analytics - Documents\Automation and Data\MonitoringForCIDADesktop"
+            )
+        os.chdir(backup_path)
         ScriptMonitoringCSV = pd.read_csv("ScriptMonitoringCSV.csv")
         ScriptMonitoringCSV = pd.concat([ScriptMonitoringCSV, ScriptMonitoringUpdate])
         ScriptMonitoringCSV.to_csv("ScriptMonitoringCSV.csv", index=False)
@@ -153,7 +175,7 @@ def scriptmonitoring(
                 "data": {
                     "name": script + " failed in SQL Monitoring",
                     "notes": scriptoutput,
-                    "assignee": "ipoole@bu.edu",
+                    "assignee": asana_assignee,
                     "projects": project,
                 }
             }
@@ -174,7 +196,7 @@ def scriptmonitoring(
                 "data": {
                     "name": script + " failed",
                     "notes": scriptoutput,
-                    "assignee": "ipoole@bu.edu",
+                    "assignee": asana_assignee,
                     "projects": project,
                 }
             }
