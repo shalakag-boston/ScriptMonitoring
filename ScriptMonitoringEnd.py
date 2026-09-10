@@ -62,6 +62,12 @@ def scriptmonitoring(
     tasks_api_instance = asana.TasksApi(api_client)
     opts = {}
 
+    # Which Asana project failure tasks get created in. Defaults to the
+    # original project for backward compatibility, but should be
+    # overridden per-environment/per-token since a project ID is only
+    # valid within the workspace that Asana token has access to.
+    asana_project = os.environ.get("CIDA_ASANA_PROJECT", "1203415330244683")
+
     ScriptMonitoringUpdate = pd.DataFrame(
         columns=[
             "script",
@@ -89,7 +95,6 @@ def scriptmonitoring(
     # finally we run the data either to the SQL server or if ti fails to get to the sql server as a backup to a csv
     try:
         # this relates to the production issues log
-        project = "1203415330244683"
         server = "CIDA-SQL-T-01"
         database = "cida_montioring"
         username = os.environ.get("CIDA_SQL_USERNAME")
@@ -102,6 +107,12 @@ def scriptmonitoring(
             )
         table = "python_script_monitoring"
         odbc_driver = os.environ.get("CIDA_SQL_ODBC_DRIVER", "ODBC Driver 17 for SQL Server")
+        # ODBC Driver 18+ enforces encryption by default and will refuse to
+        # connect to a server without a trusted certificate unless told
+        # otherwise. Override via CIDA_SQL_TRUST_SERVER_CERT=no if your
+        # server has a properly trusted cert and you want encryption
+        # verified normally.
+        trust_cert = os.environ.get("CIDA_SQL_TRUST_SERVER_CERT", "yes")
         connection_string = (
             "DRIVER={" + odbc_driver + "};SERVER="
             + server
@@ -111,6 +122,7 @@ def scriptmonitoring(
             + username
             + ";PWD="
             + password
+            + ";TrustServerCertificate=" + trust_cert
         )
         connection_url = URL.create(
             "mssql+pyodbc", query={"odbc_connect": connection_string}
@@ -167,42 +179,43 @@ def scriptmonitoring(
         ScriptMonitoringCSV.to_csv("ScriptMonitoringCSV.csv", index=False)
 
         try:
-            # this relates to the bu.edu workspace and may need to be changed in the future, but we can also create the projet with just the ID
-            # workspace = '676371944581295'
-            # the below creates the task in the project based on project id and assigns it to ipoole, best practice would be to assign it to whomever owns the script/automation
-            # client.tasks.create_task({'name':'Test','assignee':'ipoole@bu.edu','projects':project})
             body = {
                 "data": {
                     "name": script + " failed in SQL Monitoring",
                     "notes": scriptoutput,
                     "assignee": asana_assignee,
-                    "projects": project,
+                    "projects": asana_project,
                 }
             }
             tasks_api_instance.create_task(body, opts)
         except:
             emailsubject = "CIDASCRIPTLOG: " + script + " failed"
             emailbody = script + " failed in SQL Monitoring & Asana"
-            outlook = win32com.client.Dispatch("outlook.application")
-            mail = outlook.CreateItem(0)
-            mail.To = "cidadata@bu.edu"
-            mail.Subject = emailsubject
-            mail.Body = emailbody
-            mail.Send()
+            try:
+                outlook = win32com.client.Dispatch("outlook.application")
+                mail = outlook.CreateItem(0)
+                mail.To = "cidadata@bu.edu"
+                mail.Subject = emailsubject
+                mail.Body = emailbody
+                mail.Send()
+            except Exception as email_err:
+                print(
+                    "WARNING: Could not log failure to SQL, CSV backup, "
+                    "Asana, or Outlook email. Error: " + str(email_err)
+                )
     if failure == 1:
-        # the very simple asana script below builds out a client and then creates the task
         try:
             body = {
                 "data": {
                     "name": script + " failed",
                     "notes": scriptoutput,
                     "assignee": asana_assignee,
-                    "projects": project,
+                    "projects": asana_project,
                 }
             }
             tasks_api_instance.create_task(body, opts)
-        # if that breaks we send an email to cidadata@bu.edu
-        except:
+        except Exception as asana_err:
+            print("WARNING: Asana task creation failed. Error: " + str(asana_err))
             emailsubject = "CIDASCRIPTLOG: " + script + " failed"
             emailbody = (
                 user
@@ -218,9 +231,15 @@ def scriptmonitoring(
                 + scriptoutput
                 + ", failed to reach Asana"
             )
-            outlook = win32com.client.Dispatch("outlook.application")
-            mail = outlook.CreateItem(0)
-            mail.To = "cidadata@bu.edu"
-            mail.Subject = emailsubject
-            mail.Body = emailbody
-            mail.Send()
+            try:
+                outlook = win32com.client.Dispatch("outlook.application")
+                mail = outlook.CreateItem(0)
+                mail.To = "cidadata@bu.edu"
+                mail.Subject = emailsubject
+                mail.Body = emailbody
+                mail.Send()
+            except Exception as email_err:
+                print(
+                    "WARNING: Could not create Asana task or send "
+                    "fallback email. Error: " + str(email_err)
+                )
